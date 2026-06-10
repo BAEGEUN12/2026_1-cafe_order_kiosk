@@ -23,6 +23,21 @@ class MenuItem:
     is_available: bool = True
 
 
+@dataclass(frozen=True)
+class MenuRating:
+    menu_item_id: int
+    score: int
+    comment: str | None = None
+    created_at: datetime = field(default_factory=utc_now)
+
+
+@dataclass(frozen=True)
+class MenuRatingSummary:
+    menu_item_id: int
+    average: float
+    count: int
+
+
 @dataclass
 class OrderItem:
     menu_item_id: int

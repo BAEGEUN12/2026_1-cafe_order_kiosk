@@ -43,6 +43,8 @@ def run_cli() -> int:
             handle_rating(store, args)
         elif command in {"베스트", "best", "추천", "bestmenu"}:
             handle_best_menu(store, args)
+        elif command in {"영수증", "receipt", "bill"}:
+            handle_receipt(store, state, args)
         elif command in {"주문", "order"}:
             handle_order(store, state, args)
         elif command in {"주문목록", "orders"}:
@@ -60,6 +62,7 @@ def print_help() -> None:
     print("\t메뉴")
     print("\t별점 <메뉴_id> <1~5> [후기]")
     print("\t베스트 [개수]")
+    print("\t영수증 [주문_id]")
     print("\t주문 생성 [메모]")
     print("\t주문 선택 <주문_id>")
     print("\t주문 추가 <메뉴_id> <수량> [옵션]")
@@ -136,6 +139,25 @@ def handle_best_menu(store: KioskStore, args: list[str]) -> None:
             f"\t{rank}. {menu_item.name} (메뉴 #{menu_item.id}) - "
             f"{format_rating_summary(summary)}"
         )
+
+def handle_receipt(store: KioskStore, state: CLIState, args: list[str]) -> None:
+    if args:
+        order_id = parse_int_arg(args[:1], "order_id")
+        if order_id is None:
+            return
+    else:
+        if state.current_order_id is None:
+            print("선택된 주문이 없습니다. 사용법: 영수증 [주문_id]")
+            return
+        order_id = state.current_order_id
+
+    order = store.get_order(order_id)
+    if order is None:
+        print("주문을 찾을 수 없습니다.")
+        return
+
+    print_receipt(order)
+
 
 def handle_order(store: KioskStore, state: CLIState, args: list[str]) -> None:
     if not args:
@@ -272,6 +294,45 @@ def handle_pay(store: KioskStore, state: CLIState, args: list[str]) -> None:
     print(f"주문 #{order.id} 결제 완료 ({method}).")
 
 
+def print_receipt(order) -> None:
+    print("=" * 36)
+    print("           CAFE RECEIPT")
+    print("=" * 36)
+    print(f"주문번호: #{order.id}")
+    print(f"주문상태: {format_status(order.status)}")
+    print(f"주문시간: {format_datetime(order.created_at)}")
+    if order.note:
+        print(f"메모: {order.note}")
+    print("-" * 36)
+
+    if not order.items:
+        print("주문 항목이 없습니다.")
+    else:
+        for idx, item in enumerate(order.items, start=1):
+            options = f" [{', '.join(item.options)}]" if item.options else ""
+            print(f"{idx}. {item.name}{options}")
+            print(
+                f"   {format_money(item.unit_price)} x {item.quantity}"
+                f" = {format_money(item.line_total)}원"
+            )
+
+    print("-" * 36)
+    print(f"합계: {format_money(order.total)}원")
+
+    if order.payment is not None:
+        print(f"결제방법: {order.payment.method}")
+        print(f"결제금액: {format_money(order.payment.amount)}원")
+        print(f"결제시간: {format_datetime(order.payment.paid_at)}")
+    else:
+        print("결제정보: 미결제")
+
+    if order.status is OrderStatus.CANCELED and order.canceled_at is not None:
+        print(f"취소시간: {format_datetime(order.canceled_at)}")
+
+    print("=" * 36)
+    print("이용해 주셔서 감사합니다.")
+
+
 def print_order(order) -> None:
     print(f"주문 #{order.id} ({format_status(order.status)})")
     if order.note:
@@ -323,6 +384,10 @@ def format_status(status: OrderStatus) -> str:
         OrderStatus.CANCELED: "취소",
     }
     return status_map.get(status, status.value)
+
+
+def format_datetime(value) -> str:
+    return value.strftime("%Y-%m-%d %H:%M:%S %Z")
 
 
 def format_rating_summary(summary: MenuRatingSummary | None) -> str:
