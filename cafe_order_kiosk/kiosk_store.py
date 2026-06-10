@@ -2,7 +2,15 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 
-from cafe_order_kiosk.models import MenuItem, Order, OrderItem, OrderStatus, Payment
+from cafe_order_kiosk.models import (
+    MenuItem,
+    MenuRating,
+    MenuRatingSummary,
+    Order,
+    OrderItem,
+    OrderStatus,
+    Payment,
+)
 from cafe_order_kiosk.utils import utc_now
 
 DEFAULT_MENU: tuple[MenuItem, ...] = (
@@ -23,6 +31,7 @@ class KioskStore:
     def __init__(self, menu_items: Iterable[MenuItem] | None = None) -> None:
         self._menu: dict[int, MenuItem] = {item.id: item for item in (menu_items or [])}
         self._orders: dict[int, Order] = {}
+        self._ratings: dict[int, list[MenuRating]] = {}
         self._next_order_id = 1
 
     @classmethod
@@ -37,6 +46,74 @@ class KioskStore:
 
     def get_menu_item(self, menu_item_id: int) -> MenuItem | None:
         return self._menu.get(menu_item_id)
+
+    def add_rating(
+        self,
+        menu_item_id: int,
+        score: int,
+        comment: str | None = None,
+    ) -> MenuRating:
+        menu_item = self._menu.get(menu_item_id)
+        if menu_item is None:
+            raise ValueError("Menu item not found")
+        if not menu_item.is_available:
+            raise ValueError("Menu item is not available")
+        if score < 1 or score > 5:
+            raise ValueError("Rating score must be between 1 and 5")
+
+        normalized_comment = comment.strip() if comment else None
+        if normalized_comment == "":
+            normalized_comment = None
+
+        rating = MenuRating(
+            menu_item_id=menu_item_id,
+            score=score,
+            comment=normalized_comment,
+        )
+        self._ratings.setdefault(menu_item_id, []).append(rating)
+        return rating
+
+    def list_ratings(self, menu_item_id: int) -> list[MenuRating]:
+        if menu_item_id not in self._menu:
+            raise ValueError("Menu item not found")
+        return list(self._ratings.get(menu_item_id, []))
+
+    def get_menu_rating_summary(self, menu_item_id: int) -> MenuRatingSummary | None:
+        if menu_item_id not in self._menu:
+            raise ValueError("Menu item not found")
+
+        ratings = self._ratings.get(menu_item_id, [])
+        if not ratings:
+            return None
+
+        average = sum(rating.score for rating in ratings) / len(ratings)
+        return MenuRatingSummary(
+            menu_item_id=menu_item_id,
+            average=average,
+            count=len(ratings),
+        )
+
+    def get_best_menu_items(
+        self,
+        limit: int = 1,
+    ) -> list[tuple[MenuItem, MenuRatingSummary]]:
+        if limit < 1:
+            raise ValueError("Limit must be at least 1")
+
+        ranked_items: list[tuple[MenuItem, MenuRatingSummary]] = []
+        for menu_item in self.list_menu():
+            summary = self.get_menu_rating_summary(menu_item.id)
+            if summary is not None:
+                ranked_items.append((menu_item, summary))
+
+        ranked_items.sort(
+            key=lambda item_and_summary: (
+                -item_and_summary[1].average,
+                -item_and_summary[1].count,
+                item_and_summary[0].id,
+            )
+        )
+        return ranked_items[:limit]
 
     def create_order(self, note: str | None = None) -> Order:
         order_id = self._next_order_id

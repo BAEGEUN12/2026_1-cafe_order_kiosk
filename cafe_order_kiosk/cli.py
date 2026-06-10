@@ -3,7 +3,7 @@ from __future__ import annotations
 import shlex
 from dataclasses import dataclass
 
-from cafe_order_kiosk.models import OrderStatus
+from cafe_order_kiosk.models import MenuRatingSummary, OrderStatus
 from cafe_order_kiosk.kiosk_store import KioskStore
 from cafe_order_kiosk.utils import format_money
 
@@ -39,6 +39,10 @@ def run_cli() -> int:
             print_help()
         elif command in {"메뉴", "menu"}:
             handle_menu(store)
+        elif command in {"별점", "평점", "rating", "rate"}:
+            handle_rating(store, args)
+        elif command in {"베스트", "best", "추천", "bestmenu"}:
+            handle_best_menu(store, args)
         elif command in {"주문", "order"}:
             handle_order(store, state, args)
         elif command in {"주문목록", "orders"}:
@@ -54,6 +58,8 @@ def run_cli() -> int:
 def print_help() -> None:
     print("명령어:")
     print("\t메뉴")
+    print("\t별점 <메뉴_id> <1~5> [후기]")
+    print("\t베스트 [개수]")
     print("\t주문 생성 [메모]")
     print("\t주문 선택 <주문_id>")
     print("\t주문 추가 <메뉴_id> <수량> [옵션]")
@@ -70,11 +76,66 @@ def handle_menu(store: KioskStore) -> None:
     print("메뉴:")
     for item in store.list_menu():
         description = f" - {item.description}" if item.description else ""
+        rating_summary = store.get_menu_rating_summary(item.id)
+        rating = format_rating_summary(rating_summary)
         print(
             f"\t{item.id}. {item.name} ({item.category}) - {format_money(item.price)}"
+            f" / {rating}"
             f"{description}"
         )
 
+
+def handle_rating(store: KioskStore, args: list[str]) -> None:
+    if len(args) < 2:
+        print("사용법: 별점 <메뉴_id> <1~5> [후기]")
+        return
+
+    menu_id = parse_int_arg(args[:1], "menu_id")
+    score = parse_int_arg(args[1:2], "rating")
+    if menu_id is None or score is None:
+        return
+
+    comment = " ".join(args[2:]).strip() if len(args) > 2 else None
+
+    try:
+        store.add_rating(menu_id, score, comment)
+        menu_item = store.get_menu_item(menu_id)
+        rating_summary = store.get_menu_rating_summary(menu_id)
+    except ValueError as exc:
+        print(str(exc))
+        return
+
+    menu_name = menu_item.name if menu_item else f"메뉴 #{menu_id}"
+    print(
+        f"{menu_name}에 {score}점 별점을 등록했습니다. "
+        f"현재 {format_rating_summary(rating_summary)}"
+    )
+
+
+def handle_best_menu(store: KioskStore, args: list[str]) -> None:
+    limit = 1
+    if args:
+        parsed_limit = parse_int_arg(args[:1], "count")
+        if parsed_limit is None:
+            return
+        limit = parsed_limit
+
+    try:
+        best_items = store.get_best_menu_items(limit)
+    except ValueError as exc:
+        print(str(exc))
+        return
+
+    if not best_items:
+        print("아직 별점이 등록된 메뉴가 없습니다.")
+        return
+
+    print("Best 메뉴:")
+    for rank, (menu_item, summary) in enumerate(best_items, start=1):
+        print(
+            f"\t{rank}. {menu_item.name} (메뉴 #{menu_item.id}) - "
+            f"{format_rating_summary(summary)}"
+        )
 
 def handle_order(store: KioskStore, state: CLIState, args: list[str]) -> None:
     if not args:
@@ -254,6 +315,7 @@ def parse_status(raw: str) -> OrderStatus | None:
         print("잘못된 상태입니다. 진행중, 결제완료, 취소 중에서 선택하세요.")
     return status
 
+
 def format_status(status: OrderStatus) -> str:
     status_map = {
         OrderStatus.OPEN: "진행중",
@@ -261,3 +323,9 @@ def format_status(status: OrderStatus) -> str:
         OrderStatus.CANCELED: "취소",
     }
     return status_map.get(status, status.value)
+
+
+def format_rating_summary(summary: MenuRatingSummary | None) -> str:
+    if summary is None:
+        return "별점 없음"
+    return f"별점 {summary.average:.1f}/5 ({summary.count}개)"
